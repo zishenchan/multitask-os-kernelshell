@@ -1,6 +1,9 @@
 #include "kernel.h"
 #include <stdint.h>
 #include <stddef.h>
+#include "idt/idt.h"
+#include "io/io.h"
+#include "memory/heap/kheap.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -77,4 +80,24 @@ void kernel_main()
     print("Welcome to the kernel development world.\n");
     print("Let's write some text to the screen.\n");
 
+    kheap_init(); // Initialize the kernel heap
+    
+
+
+    idt_init();// Initialize the IDT
+    //problem(); // Call the problem function to trigger an interrupt
+    
+    //outb(0x60, 0xff); // Send a byte to the serial port
+
+    void* ptr = kmalloc(50);
+    void* ptr2 = kmalloc(5000);
+    void* ptr3 = kmalloc(5600);
+
+    kfree(ptr);
+    void* ptr4 = kmalloc(50);
+    if (ptr || ptr2 || ptr3 || ptr4)
+    {
+        
+
+    }
 }
