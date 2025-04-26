@@ -4,6 +4,8 @@
 #include "idt/idt.h"
 #include "io/io.h"
 #include "memory/heap/kheap.h"
+#include "memory/paging/paging.h"
+#include "disk/disk.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -72,6 +74,8 @@ void print(const char* str)
     }
 }
 
+static struct paging_4gb_chunk* kernel_chunk = 0;
+
 void kernel_main()
 {   
     terminal_initialize();
@@ -82,22 +86,35 @@ void kernel_main()
 
     kheap_init(); // Initialize the kernel heap
     
-
+    // Initialize the disk
+    disk_search_and_init();
 
     idt_init();// Initialize the IDT
     //problem(); // Call the problem function to trigger an interrupt
+
+    // setup paging
+    kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
     
-    //outb(0x60, 0xff); // Send a byte to the serial port
+    // switch to the new page directory
+    paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
 
-    void* ptr = kmalloc(50);
-    void* ptr2 = kmalloc(5000);
-    void* ptr3 = kmalloc(5600);
+    // enable paging
+    enable_paging(); // Enable paging
 
-    kfree(ptr);
-    void* ptr4 = kmalloc(50);
-    if (ptr || ptr2 || ptr3 || ptr4)
-    {
-        
+   
+    /*
+     char* ptr2 = (char*)0x1000; // Get the virtual address
+    ptr2[0] = 'A'; // Write to the allocated memory
+    ptr2[1] = 'B'; 
+    print(ptr2); // Print the contents of the allocated memory  
+    print(ptr); 
+    both pointer ptr points to 0x1000000, page talbe level,
+    ptr2 points to 0x1000, page table level,0x1000 -> 0x1000000,
+    they both point to the same physical address, in the page table
+    char buf[512];
+    disk_read_sector(0, 1, buf); // Read a sector from the disk
+    */
+    
 
-    }
+    enable_interrupts(); // make use below enable paging
 }

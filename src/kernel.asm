@@ -32,8 +32,7 @@
 
     ;remap the slave PIC, the master PIC
 
-    ;enable interrupts
-    sti
+
     
     call kernel_main
 
