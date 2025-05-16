@@ -6,6 +6,8 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "disk/disk.h"
+#include "fs/pparser.h"
+#include "disk/streamer.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -117,4 +119,16 @@ void kernel_main()
     
 
     enable_interrupts(); // make use below enable paging
+
+    /*struct path_root* root_path = pathparser_parse("0:/bin/test.exe", NULL);
+
+    if(root_path)
+    {
+        
+    }*/
+    struct disk_stream* stream = diskstreamer_new(0);
+    diskstreamer_seek(stream, 0x201);
+    unsigned char c = 0;
+    diskstreamer_read(stream, &c, 1);
+    while(1){}
 }
