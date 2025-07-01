@@ -4,6 +4,9 @@
 #include "memory/heap/kheap.h"
 #include "status.h"
 #include "kernel.h"
+#include "fat/fat16.h"
+#include "disk/disk.h"
+#include "string/string.h"
 
 struct filesystem* filesystems[MULTITASK_OS_KERNELSHELL_MAX_FILESYSTEMS];// filesystem is array
 struct file_descriptor* file_descriptors[MULTITASK_OS_KERNELSHELL_FILE_DESCRIPTOR];
@@ -100,7 +103,90 @@ struct filesystem* fs_resolve(struct disk* disk)
     return fs;
 }
 
-int fopen(const char* filename, const char* mode)
+
+FILE_MODE file_get_mode_by_string(const char* str)
 {
-    return -EIO;
+    FILE_MODE mode = FILE_MODE_INVALID;
+    if (strncmp(str, "r", 1) == 0) // we choose the binary mode by provided in header
+    {
+        mode = FILE_MODE_READ;
+    }
+    else if(strncmp(str, "w", 1) == 0)
+    {
+        mode = FILE_MODE_WRITE;
+    }
+    else if(strncmp(str, "a", 1) == 0)
+    {
+        mode = FILE_MODE_APPEND;
+    }
+    return mode;
+}
+
+int fopen(const char* filename, const char* mode_str) // to locate file by correct drive number
+{
+    int res = 0;
+    struct path_root* root_path = pathparser_parse(filename, NULL); // parse the path, like 0:/test.txt
+    if (!root_path)
+    {
+        res = -EINVARG;
+        goto out;
+    }
+
+    // We cannot have just a root path 0:/ 0:/test.txtMore actions
+    if (!root_path->first)
+    {
+        res = -EINVARG;
+        goto out;
+    } // ensure we do not waste any CPU time
+
+    // Ensure the disk we are reading from exists
+    struct disk* disk = disk_get(root_path->drive_no); // pass the disk humber, like 0:// 0://, the second one
+    if (!disk)
+    {
+        res = -EIO;
+        goto out;
+    }
+
+    // check if the filesystem is available for the disk
+    if (!disk->filesystem)
+    {
+        res = -EIO;
+        goto out;
+    }
+
+    // we know it's valid disk, so we can resolve the filesystem
+    FILE_MODE mode = file_get_mode_by_string(mode_str);
+    if (mode == FILE_MODE_INVALID)
+    {
+        res = -EINVARG;
+        goto out;
+    }
+
+    // this is how file is being linked
+    void* descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);
+    
+    if (ISERR(descriptor_private_data)) // know it's error, and check
+    {
+        res = ERROR_I(descriptor_private_data);
+        goto out;
+    }
+
+    struct file_descriptor* desc = 0;
+    res = file_new_descriptor(&desc); // pass the descriptor
+    if (res < 0)
+    {
+        goto out;
+    }
+    desc->filesystem = disk->filesystem;
+    desc->private = descriptor_private_data;
+    desc->disk = disk; // set the disk 
+    res = desc->index;
+
+
+out: 
+    // fopen shouldnt return negative valuesMore actions
+    if (res < 0)
+    res = 0;
+    
+    return res;
 }
