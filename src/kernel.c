@@ -9,6 +9,10 @@
 #include "disk/disk.h"
 #include "fs/pparser.h"
 #include "disk/streamer.h"
+#include "gdt/gdt.h"
+#include "config.h"
+#include "memory/memory.h"
+#include "task/tss.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -68,10 +72,38 @@ void print(const char* str)
 
 
 static struct paging_4gb_chunk* kernel_chunk = 0;
+
+
+void panic(const char* msg) // the kernel panic function
+{
+    print(msg);
+    while(1) {}
+}
+
+struct tss tss;
+
+// more clear version for gdt_data in boot.asm
+struct gdt gdt_real[MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS];
+struct gdt_structured gdt_structured[MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS] = {
+    {.base = 0x00, .limit = 0x00, .type = 0x00},                // NULL Segment
+    {.base = 0x00, .limit = 0xffffffff, .type = 0x9a},           // Kernel code segment
+    {.base = 0x00, .limit = 0xffffffff, .type = 0x92},            // Kernel data segment
+    {.base = 0x00, .limit = 0xffffffff, .type = 0xf8},              // User code segment
+    {.base = 0x00, .limit = 0xffffffff, .type = 0xf2},             // User data segment
+    {.base = (uint32_t)&tss, .limit=sizeof(tss), .type = 0xE9}      // TSS Segment
+};
+// the limit 0xffffffff is physical address, since we use paging memory model, the limitation will be doen by paging
+
 void kernel_main()
 {
     terminal_initialize();
     print("Hello world!\ntest");
+
+    memset(gdt_real, 0x00, sizeof(gdt_real));
+    gdt_structured_to_gdt(gdt_real, gdt_structured, MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS);
+
+    // Load the gdt
+    gdt_load(gdt_real, sizeof(gdt_real));
 
     // Initialize the heap
     kheap_init();
@@ -84,6 +116,14 @@ void kernel_main()
 
     // Initialize the interrupt descriptor table
     idt_init();
+
+    // Setup the TSS
+    memset(&tss, 0x00, sizeof(tss));// memset the whole tss to 0
+    tss.esp0 = 0x600000; // where the kernel tack is located
+    tss.ss0 = KERNEL_DATA_SELECTOR;
+
+    // Load the TSS
+    tss_load(0x28);// 28 due to the offset
 
     // Setup paging
     kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
