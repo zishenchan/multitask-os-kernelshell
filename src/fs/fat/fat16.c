@@ -125,11 +125,20 @@ struct fat_private
 
 int fat16_resolve(struct disk* disk);
 void* fat16_open(struct disk* disk, struct path_part* path, FILE_MODE mode);
+int fat16_read(struct disk* disk, void* descriptor, uint32_t size, uint32_t nmemb, char* out_ptr);
+int fat16_seek(void *private, uint32_t offset, FILE_SEEK_MODE seek_mode);
+int fat16_stat(struct disk* disk, void* private, struct file_stat* stat);
+int fat16_close(void* private);
+
 
 struct filesystem fat16_fs =
 {
     .resolve = fat16_resolve,
-    .open = fat16_open
+    .open = fat16_open,
+    .read = fat16_read,
+    .seek = fat16_seek,
+    .stat = fat16_stat,
+    .close = fat16_close
 };
 
 struct filesystem* fat16_init()
@@ -455,7 +464,7 @@ static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream
     int offset_from_cluster = offset % size_of_cluster_bytes; // the % calculation
 
     int starting_sector = fat16_cluster_to_sector(private, cluster_to_use);
-    int starting_pos = (starting_sector * disk->sector_size) * offset_from_cluster;
+    int starting_pos = (starting_sector * disk->sector_size) + offset_from_cluster;
     int total_to_read = total > size_of_cluster_bytes ? size_of_cluster_bytes : total;
     // if more than size, then use size_of_cluster_bytes, otherwise use total, can only read cluster at a time
 
@@ -638,6 +647,8 @@ out:
     return current_item;
 }
 
+
+
 void* fat16_open(struct disk* disk, struct path_part* path, FILE_MODE mode)
 {
     if (mode != FILE_MODE_READ)
@@ -661,4 +672,106 @@ void* fat16_open(struct disk* disk, struct path_part* path, FILE_MODE mode)
     descriptor->pos = 0;
     return descriptor;
 
+}
+
+static void fat16_free_file_descriptor(struct fat_file_descriptor* desc)
+{
+    fat16_fat_item_free(desc->item);
+    kfree(desc);
+}
+
+
+int fat16_close(void* private)
+{
+    fat16_free_file_descriptor((struct fat_file_descriptor*) private);
+    return 0;
+}
+
+int fat16_stat(struct disk* disk, void* private, struct file_stat* stat)
+{
+    int res = 0;
+    struct fat_file_descriptor* descriptor = (struct fat_file_descriptor*) private;
+    struct fat_item* desc_item = descriptor->item;
+    if (desc_item->type != FAT_ITEM_TYPE_FILE)
+    {
+        res = -EINVARG;
+        goto out;
+    }
+
+    struct fat_directory_item* ritem = desc_item->item;
+    stat->filesize = ritem->filesize; // we can put 10 bytes, but we pull the size from fat_directory_item
+    stat->flags = 0x00;
+
+    if (ritem->attribute & FAT_FILE_READ_ONLY)
+    {
+        stat->flags |= FILE_STAT_READ_ONLY; // set the flag of stat
+    }
+out:
+    return res;
+}
+
+
+// this function should return successfully read nmemb
+int fat16_read(struct disk* disk, void* descriptor, uint32_t size, uint32_t nmemb, char* out_ptr)
+{
+    int res = 0;
+    struct fat_file_descriptor* fat_desc = descriptor;
+    struct fat_directory_item* item = fat_desc->item->item; // the first item contains fat_directory_item
+    int offset = fat_desc->pos;
+    for (uint32_t i = 0; i < nmemb; i++) // loop the nmemb 
+    {
+        res = fat16_read_internal(disk, fat16_get_first_cluster(item), offset, size, out_ptr);
+        if (ISERR(res))
+        {
+            goto out;
+        }
+
+        out_ptr += size;
+        offset += size;
+    }
+
+    res = nmemb;
+out:
+    return res;
+}
+
+// implementation of the seek function
+int fat16_seek(void *private, uint32_t offset, FILE_SEEK_MODE seek_mode)
+{
+    int res = 0;
+    struct fat_file_descriptor *desc = private;
+    struct fat_item *desc_item = desc->item;
+    if (desc_item->type != FAT_ITEM_TYPE_FILE)
+    {
+        res = -EINVARG;
+        goto out;
+    }
+
+    struct fat_directory_item *ritem = desc_item->item;
+    if (offset >= ritem->filesize)
+    {
+        res = -EIO;
+        goto out;
+    }
+
+    switch (seek_mode)
+    {
+    case SEEK_SET:
+        desc->pos = offset;
+        break;
+
+    case SEEK_END:
+        res = -EUNIMP;
+        break;
+
+    case SEEK_CUR:
+        desc->pos += offset;
+        break;
+
+    default:
+        res = -EINVARG;
+        break;
+    }
+out:
+    return res;
 }
