@@ -1,6 +1,7 @@
 #include "task.h"
 #include "kernel.h"
 #include "status.h"
+#include "process.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
 
@@ -11,7 +12,7 @@ struct task* current_task = 0;
 struct task* task_tail = 0;
 struct task* task_head = 0;
 
-int task_init(struct task* task);
+int task_init(struct task* task, struct process* process);
 
 
 struct task* task_current()
@@ -19,7 +20,7 @@ struct task* task_current()
     return current_task;
 }
 
-struct task* task_new()
+struct task* task_new(struct process* process)
 {
     int res = 0;
     struct task* task = kzalloc(sizeof(struct task));
@@ -29,7 +30,7 @@ struct task* task_new()
         goto out;
     }
 
-    res = task_init(task); // passig task just created abrove
+    res = task_init(task, process); // passig task just created abrove
     if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
     {
         goto out;
@@ -100,7 +101,34 @@ int task_free(struct task* task)
     return 0;
 }
 
-int task_init(struct task* task)
+// this funciton change the current task, and switch the paging directory
+int task_switch(struct task* task)
+{
+    current_task = task;
+    paging_switch(task->page_directory->directory_entry);
+    return 0;
+}
+
+// this function takes out of kernel page directory, and loads into the user page directory
+int task_page()
+{
+    user_registers();
+    task_switch(current_task);
+    return 0;
+}
+
+void task_run_first_ever_task()
+{
+    if (!current_task)
+    {
+        panic("task_run_first_ever_task(): No current task exists!\n");
+    }
+
+    task_switch(task_head);
+    task_return(&task_head->registers);
+}
+
+int task_init(struct task* task, struct process* process)
 {
     memset(task, 0, sizeof(struct task));
     // Map the entire 4GB address space to its self
@@ -113,6 +141,8 @@ int task_init(struct task* task)
     task->registers.ip = MULTITASK_OS_KERNELSHELL_PROGRAM_VIRTUAL_ADDRESS; // ip last executed
     task->registers.ss = USER_DATA_SEGMENT;
     task->registers.esp = MULTITASK_OS_KERNELSHELL_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+
+    task->process = process; // set the process that the task belongs to
 
     return 0;
 }
