@@ -13,6 +13,9 @@
 #include "config.h"
 #include "memory/memory.h"
 #include "task/tss.h"
+#include "task/task.h"
+#include "task/process.h"
+#include "status.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -129,19 +132,21 @@ void kernel_main()
     kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 
     // Switch to kernel paging chunk
-    paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+    paging_switch(kernel_chunk);
 
     // Enable paging
     enable_paging();
 
-    // Enable the system interrupts
-    enable_interrupts();
-
-    int fd = fopen("0:/hello2.txt", "r");
-    if (fd)
+    struct process* process = 0;
+    int res  = process_load("0:/blank.bin", &process);
+    if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
     {
-        print("We opened hello.txt\n");
+        panic("Failed to load process\n");
     }
+
+    task_run_first_ever_task(); // Run the first task, which is the process we just loaded
+
+
     while(1) {}
 
 }

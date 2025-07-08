@@ -40,6 +40,7 @@ struct task* task_new(struct process* process)
     {
         task_head = task;
         task_tail = task;
+        current_task = task; // set the current task to the new task
         goto out;
     }
 
@@ -105,7 +106,7 @@ int task_free(struct task* task)
 int task_switch(struct task* task)
 {
     current_task = task;
-    paging_switch(task->page_directory->directory_entry);
+    paging_switch(task->page_directory);
     return 0;
 }
 
@@ -140,6 +141,7 @@ int task_init(struct task* task, struct process* process)
 
     task->registers.ip = MULTITASK_OS_KERNELSHELL_PROGRAM_VIRTUAL_ADDRESS; // ip last executed
     task->registers.ss = USER_DATA_SEGMENT;
+    task->registers.cs = USER_CODE_SEGMENT; // code segment
     task->registers.esp = MULTITASK_OS_KERNELSHELL_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
 
     task->process = process; // set the process that the task belongs to
