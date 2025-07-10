@@ -3,13 +3,17 @@
 #include "kernel.h"
 #include "memory/memory.h"
 #include "io/io.h"
+#include "task/task.h"
 
 struct idt_desc idt_descriptors[MULTITASK_OS_KERNELSHELL_TOTAL_INTERRUPTS];
 struct idtr_desc idtr_descriptor;
 
+static ISR80H_COMMAND isr80h_commands[MULTITASK_OS_KERNELSHELL_MAX_ISR80H_COMMANDS];
+
 extern void idt_load(struct idtr_desc* ptr);
 extern void int21h(); // Example: This should be defined in your assembly code
 extern void no_interrupt(); // This should be defined in your assembly code
+extern void isr80h_wapper(); // This should be defined in your assembly code
 
 void int21h_handler()
 {
@@ -54,7 +58,54 @@ void idt_init()
 
     idt_set(0, idt_zero); // Example: Set interrupt 0 to a dummy address
     idt_set(0x21, int21h); // Set interrupt 21h to the keyboard handler
+    idt_set(0x80, isr80h_wapper);
 
     // load the interrupt descriptor table
     idt_load(&idtr_descriptor);// passing the address of the IDTR
+}
+
+void isr80h_register_command(int command_id, ISR80H_COMMAND command)
+{
+    if (command_id < 0 || command_id >= MULTITASK_OS_KERNELSHELL_MAX_ISR80H_COMMANDS)
+    {
+        panic("The command is out of bounds\n");
+    }
+
+    if (isr80h_commands[command_id]) // make sure command is not already taken
+    {
+        panic("Your attempting to overwrite an existing command\n");
+    }
+
+    isr80h_commands[command_id] = command;
+}
+
+void* isr80h_handle_command(int command, struct interrupt_frame* frame)
+{
+    void* result = 0;
+
+    if(command < 0 || command >= MULTITASK_OS_KERNELSHELL_MAX_ISR80H_COMMANDS)
+    {
+        // Invalid command
+        return 0;
+    }
+
+    ISR80H_COMMAND command_func = isr80h_commands[command];
+    if (!command_func)
+    {
+        return 0; // user land return 0 if invalid, just can not handle 
+    }
+
+    result = command_func(frame);
+    return result;
+}
+
+
+void* isr80h_handler(int command, struct interrupt_frame* frame)
+{
+    void* res = 0;
+    kernel_page(); // following four lines of functions ready to be implemented
+    task_current_save_state(frame); // save the registers
+    res = isr80h_handle_command(command, frame); 
+    task_page();
+    return res;
 }

@@ -4,23 +4,26 @@
 #include "process.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
+#include "idt/idt.h"
+#include "memory/paging/paging.h"
+#include "string/string.h"
 
 // The current task that is running
-struct task* current_task = 0;
+struct task *current_task = 0;
 
 // Task linked list, means task has pointer to another task
-struct task* task_tail = 0;
-struct task* task_head = 0;
+struct task *task_tail = 0;
+struct task *task_head = 0;
 
-int task_init(struct task* task, struct process* process);
+int task_init(struct task *task, struct process *process);
 
 
-struct task* task_current()
+struct task *task_current()
 {
     return current_task;
 }
 
-struct task* task_new(struct process* process)
+struct task *task_new(struct process *process)
 {
     int res = 0;
     struct task* task = kzalloc(sizeof(struct task));
@@ -58,7 +61,7 @@ out:
     return task;
 }
 
-struct task* task_get_next()
+struct task *task_get_next()
 {
     if (!current_task->next)
     {
@@ -69,7 +72,7 @@ struct task* task_get_next()
 }
 
 // user only access to this function by task_free
-static void task_list_remove(struct task* task)
+static void task_list_remove(struct task *task)
 {
     if (task->prev) // check if pervious pointer
     {
@@ -92,7 +95,7 @@ static void task_list_remove(struct task* task)
     }
 }
 
-int task_free(struct task* task)
+int task_free(struct task *task)
 {
     paging_free_4gb(task->page_directory);
     task_list_remove(task);
@@ -103,11 +106,82 @@ int task_free(struct task* task)
 }
 
 // this funciton change the current task, and switch the paging directory
-int task_switch(struct task* task)
+int task_switch(struct task *task)
 {
     current_task = task;
     paging_switch(task->page_directory);
     return 0;
+}
+
+// we are stating the state of the task, we can resume the task later / save it and come back
+void task_save_state(struct task *task, struct interrupt_frame *frame)
+{
+    task->registers.ip = frame->ip;
+    task->registers.cs = frame->cs;
+    task->registers.flags = frame->flags;
+    task->registers.esp = frame->esp;
+    task->registers.ss = frame->ss;
+    task->registers.eax = frame->eax;
+    task->registers.ebp = frame->ebp;
+    task->registers.ebx = frame->ebx;
+    task->registers.ecx = frame->ecx;
+    task->registers.edi = frame->edi;
+    task->registers.edx = frame->edx;
+    task->registers.esi = frame->esi;
+}
+
+/**
+ * needs to be in kernel page first, and the virtual can not access from kernel land.
+ * So in paging_map() we map the virtual adress, tmp, to physical address, tmp (second tmp).
+ * 
+ */
+int copy_string_from_task(struct task* task, void* virtual, void* phys, int max)
+{
+    if (max >= PAGING_PAGE_SIZE)
+    {
+        return -EINVARG;
+    }
+
+    int res = 0;
+    char* tmp = kzalloc(max); // allocate memory to copy string, both map same address tmp
+    if (!tmp)
+    {
+        res = -ENOMEM;
+        goto out;
+    }
+
+    uint32_t* task_directory = task->page_directory->directory_entry;
+    uint32_t old_entry = paging_get(task_directory, tmp);
+    paging_map(task->page_directory, tmp, tmp, PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    paging_switch(task->page_directory);
+    strncpy(tmp, virtual, max); // safely copy virtual string straight to tep, both points to same place
+    kernel_page();
+
+    res = paging_set(task_directory, tmp, old_entry);// back to kernel page
+    if (res < 0)
+    {
+        res = -EIO;
+        goto out_free;
+    }
+
+    strncpy(phys, tmp, max);
+
+out_free:
+    kfree(tmp);
+out:
+    return res;
+}
+
+// this function is needed to be called in kernel land, page need to be set in kernel land
+void task_current_save_state(struct interrupt_frame *frame)
+{
+    if (!task_current())
+    {
+        panic("No current task to save\n");
+    }
+
+    struct task *task = task_current();
+    task_save_state(task, frame);
 }
 
 // this function takes out of kernel page directory, and loads into the user page directory
@@ -115,6 +189,13 @@ int task_page()
 {
     user_registers();
     task_switch(current_task);
+    return 0;
+}
+
+int task_page_task(struct task* task)
+{
+    user_registers();
+    paging_switch(task->page_directory);
     return 0;
 }
 
@@ -129,7 +210,7 @@ void task_run_first_ever_task()
     task_return(&task_head->registers);
 }
 
-int task_init(struct task* task, struct process* process)
+int task_init(struct task *task, struct process *process)
 {
     memset(task, 0, sizeof(struct task));
     // Map the entire 4GB address space to its self
@@ -147,4 +228,24 @@ int task_init(struct task* task, struct process* process)
     task->process = process; // set the process that the task belongs to
 
     return 0;
+}
+
+/**
+ * pull the stack item from the task stack
+ */
+void* task_get_stack_item(struct task* task, int index)
+{
+    void* result = 0;
+
+    uint32_t* sp_ptr = (uint32_t*) task->registers.esp;// get the stack pointer
+
+    // Switch to the given tasks page
+    task_page_task(task);
+
+    result = (void*) sp_ptr[index];// you add stack, it's downwards, pull is upwards
+
+    // Switch back to the kernel page
+    kernel_page();
+
+    return result;
 }

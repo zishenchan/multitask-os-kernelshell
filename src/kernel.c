@@ -16,6 +16,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "status.h"
+#include "isr80h/isr80h.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -83,8 +84,14 @@ void panic(const char* msg) // the kernel panic function
     while(1) {}
 }
 
-struct tss tss;
+void kernel_page()
+{
+    kernel_registers();
+    paging_switch(kernel_chunk);
+}
 
+
+struct tss tss;
 // more clear version for gdt_data in boot.asm
 struct gdt gdt_real[MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS];
 struct gdt_structured gdt_structured[MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS] = {
@@ -136,6 +143,9 @@ void kernel_main()
 
     // Enable paging
     enable_paging();
+
+    // Register the kernel commands
+    isr80h_register_commands();
 
     struct process* process = 0;
     int res  = process_load("0:/blank.bin", &process);
