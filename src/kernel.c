@@ -17,6 +17,7 @@
 #include "task/process.h"
 #include "status.h"
 #include "isr80h/isr80h.h"
+#include "keyboard/keyboard.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -32,12 +33,36 @@ void terminal_putchar(int x, int y, char c, char colour)
     video_mem[(y * VGA_WIDTH) + x] = terminal_make_char(c, colour);
 }
 
+void terminal_backspace()
+{
+    if (terminal_row == 0 && terminal_col == 0)
+    {
+        return;
+    }
+
+    if (terminal_col == 0)
+    {
+        terminal_row -= 1;
+        terminal_col = VGA_WIDTH;
+    }
+
+    terminal_col -=1;
+    terminal_writechar(' ', 15);
+    terminal_col -=1;
+}
+
 void terminal_writechar(char c, char colour)
 {
     if (c == '\n')
     {
         terminal_row += 1;
         terminal_col = 0;
+        return;
+    }
+
+    if (c == 0x08)
+    {
+        terminal_backspace();
         return;
     }
 
@@ -104,10 +129,11 @@ struct gdt_structured gdt_structured[MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS
 };
 // the limit 0xffffffff is physical address, since we use paging memory model, the limitation will be doen by paging
 
+
 void kernel_main()
 {
     terminal_initialize();
-    print("Hello world!\ntest");
+    //print("Hello world!\ntest");
 
     memset(gdt_real, 0x00, sizeof(gdt_real));
     gdt_structured_to_gdt(gdt_real, gdt_structured, MULTITASK_OS_KERNELSHELL_TOTAL_GDT_SEGMENTS);
@@ -147,12 +173,20 @@ void kernel_main()
     // Register the kernel commands
     isr80h_register_commands();
 
+    // Initialize the keyboard
+    keyboard_init();
+
+    //idt_register_interrupt_callback(0x21, pic_timer_callback); // Register the keyboard interrupt handler
+
     struct process* process = 0;
     int res  = process_load("0:/blank.bin", &process);
     if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
     {
         panic("Failed to load process\n");
     }
+    
+    // test the keyboard process_switch
+    keyboard_push('A');
 
     task_run_first_ever_task(); // Run the first task, which is the process we just loaded
 
