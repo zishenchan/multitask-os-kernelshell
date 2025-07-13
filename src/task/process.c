@@ -8,6 +8,8 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "kernel.h"
+#include "loader/format/elfloader.h"
+
 
 // The current process that is running
 struct process* current_process = 0;
@@ -79,10 +81,31 @@ out:
     return res;
 }
 
+static int process_load_elf(const char* filename, struct process* process)
+{
+    int res = 0;
+    struct elf_file* elf_file = 0;
+    res = elf_load(filename, &elf_file);// load the file, validate pointer later
+    if (ISERR(res))
+    {
+        goto out;
+    }
+
+    process->filetype = PROCESS_FILETYPE_ELF;
+    process->elf_file = elf_file;
+out:
+    return res;
+}
+
 static int process_load_data(const char* filename, struct process* process)
 {
     int res = 0;
-    res = process_load_binary(filename, process);
+    //res = process_load_binary(filename, process);
+    res = process_load_elf(filename, process);
+    if (res == -EINFORMAT)// file we can't deal with
+    {
+        res = process_load_binary(filename, process);
+    }
     return res;
 }
 
@@ -98,17 +121,59 @@ int process_map_binary(struct process* process)
      */
 }
 
+static int process_map_elf(struct process* process)
+{
+    int res = 0;
+
+    struct elf_file* elf_file = process->elf_file;
+
+    struct elf_header* header = elf_header(elf_file);
+    struct elf32_phdr* phdrs = elf_pheader(header);
+    for (int i = 0; i < header->e_phnum; i++)
+    {
+        struct elf32_phdr* phdr = &phdrs[i];
+        void* phdr_phys_address = elf_phdr_phys_address(elf_file, phdr);// calcuate physical address
+        int flags = PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL;
+        if (phdr->p_flags & PF_W)
+        {
+            flags |= PAGING_IS_WRITEABLE;
+        }
+        /**
+         * Passing the page_directory
+         */
+        res = paging_map_to(process->task->page_directory, paging_align_to_lower_page((void*)phdr->p_vaddr), paging_align_to_lower_page(phdr_phys_address), paging_align_address(phdr_phys_address+phdr->p_filesz), flags);
+        if (ISERR(res))
+        {
+            break;
+        }
+    }
+
+    return res;
+}
+
 // the parameter is the ready-loaded process at this point
 int process_map_memory(struct process* process)
 {
     int res = 0;
-    res = process_map_binary(process);
+    switch(process->filetype)
+    {
+        case PROCESS_FILETYPE_ELF:
+            res = process_map_elf(process);
+        break;
+
+        case PROCESS_FILETYPE_BINARY:
+            res = process_map_binary(process);
+        break;
+
+        default:
+            panic("process_map_memory: Invalid filetype\n");
+    }
     if (res < 0)
     {
         goto out;
     }
     
-    // the writable allow write own stack
+    // the writable allow write own stack, map the stack memory
     paging_map_to(process->task->page_directory, (void*)MULTITASK_OS_KERNELSHELL_PROGRAM_VIRTUAL_STACK_ADDRESS_END, process->stack, paging_align_address(process->stack+MULTITASK_OS_KERNELSHELL_USER_PROGRAM_STACK_SIZE), PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL | PAGING_IS_WRITEABLE);
 out:
     return res;

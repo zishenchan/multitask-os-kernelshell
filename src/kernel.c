@@ -179,7 +179,8 @@ void kernel_main()
     //idt_register_interrupt_callback(0x21, pic_timer_callback); // Register the keyboard interrupt handler
 
     struct process* process = 0;
-    int res  = process_load("0:/blank.bin", &process);
+    //int res  = process_load("0:/blank.bin", &process);
+    int res  = process_load("0:/blank.elf", &process);
     if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
     {
         panic("Failed to load process\n");
