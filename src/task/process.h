@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include "task.h"
 #include "config.h"
+#include <stdbool.h>
+
 
 #define PROCESS_FILETYPE_ELF 0
 #define PROCESS_FILETYPE_BINARY 1
@@ -56,4 +58,8 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
 
 struct process* process_current();
 struct process* process_get(int process_id);
+
+void* process_malloc(struct process* process, size_t size);
+void process_free(struct process* process, void* ptr);
+
 #endif
