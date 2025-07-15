@@ -174,6 +174,16 @@ int paging_set(uint32_t* directory, void* virt, uint32_t val)
     return 0;
 }
 
+void* paging_get_physical_address(uint32_t* directory, void* virt)
+{
+    void* virt_addr_new = (void*) paging_align_to_lower_page(virt);
+    // page boundary is 4096 bytes, can't deal with page align, so need to lower page.
+
+    void* difference = (void*)((uint32_t) virt - (uint32_t) virt_addr_new);// calcuate the difference
+    return (void*)((paging_get(directory, virt_addr_new) & 0xfffff000) + difference);
+}
+
+
 /**
  * Return will be the physical address of the page table entry
  */

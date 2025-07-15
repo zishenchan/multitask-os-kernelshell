@@ -7,6 +7,8 @@
 #include "idt/idt.h"
 #include "task/task.h"
 
+#define CLASSIC_KEYBOARD_CAPSLOCK 0x3A
+
 int classic_keyboard_init();
 
 /**
@@ -43,6 +45,9 @@ void classic_keyboard_handle_interrupt();
 int classic_keyboard_init()
 {
     idt_register_interrupt_callback(ISR_KEYBOARD_INTERRUPT, clasic_keyboard_handle_interrupt); // Register the keyboard interrupt handler
+    
+    keyboard_set_capslock(&classic_keyboard, KEYBOARD_CAPS_LOCK_OFF);
+    
     outb(PS2_PORT, PS2_COMMAND_ENABLE_FIRST_PORT);
     return 0;
 }
@@ -55,7 +60,16 @@ uint8_t classic_keyboard_scancode_to_char(uint8_t scancode)
         return 0;
     }
 
+
     char c = keyboard_scan_set_one[scancode];// the classical keyboard only sent us scan code
+    if (keyboard_get_capslock(&classic_keyboard) == KEYBOARD_CAPS_LOCK_OFF)// upper case, that's why need to check
+    {
+        if (c >= 'A' && c <= 'Z')
+        {
+            c += 32;// the difference in ASCII table between upper and lower case is 32
+        }
+    }
+
     return c;
 }
 
@@ -70,6 +84,12 @@ void clasic_keyboard_handle_interrupt()
     if(scancode & CLASSIC_KEYBOARD_KEY_RELEASED)
     {
         return;
+    }
+
+    if (scancode == CLASSIC_KEYBOARD_CAPSLOCK)
+    {
+        KEYBOARD_CAPS_LOCK_STATE old_state = keyboard_get_capslock(&classic_keyboard);
+        keyboard_set_capslock(&classic_keyboard, old_state == KEYBOARD_CAPS_LOCK_ON ? KEYBOARD_CAPS_LOCK_OFF : KEYBOARD_CAPS_LOCK_ON);
     }
 
     uint8_t c = classic_keyboard_scancode_to_char(scancode);// if buffer is not 0, tranfer to character

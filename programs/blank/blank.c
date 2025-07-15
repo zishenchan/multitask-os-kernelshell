@@ -1,17 +1,17 @@
 #include "MULTITASKOS.H"
 #include <stdlib.h>
+#include "string.h"
+#include "stdio.h"
 
 int main(int argc, char** argv)
 {
-    printf("printf function testing\n");
-    
-    
-
-    while(1) 
+    // Test the multitasking functionality
+    while(1)
     {
-
+        print(argv[0]); // Print the name of the program
     }
     return 0;
+    
 
     /**
      * Test suite 
@@ -37,5 +37,26 @@ int main(int argc, char** argv)
      * char buf[256];
      * multitaskos_terminal_readline(buf, sizeof(buf), true);
      * print(buf); // Print the buffer content
-     */
+     * 
+    * // Test strtok function
+    * char words[] = "hello how are you";
+    * const char* token = strtok(words, " "); // specify pointer to string
+    * while(token)
+    * {
+    *     printf("%s\n", token);
+    *     token = strtok(NULL, " ");
+    * }
+    * 
+    * anohter test
+    printf("printf function testing\n");
+
+    void* ptr = malloc(512);
+    strcpy(ptr, "hello world");
+    print(ptr);
+    free(ptr);
+
+    char buffer[512];
+    buffer[0] = 'B';
+    print("abc\n");
+    */
 }

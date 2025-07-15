@@ -182,7 +182,7 @@ void kernel_main()
     
 
     /**
-     * Change to shell.elf in program/shell/src/shell.c
+     * Change to shell.elf in program/shell/src/shell.c, in compile test
      */
     int res  = process_load("0:/blank.elf", &process); 
     if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
@@ -191,8 +191,35 @@ void kernel_main()
     }
     
     // test the keyboard process_switch
-    keyboard_push('A');
+    //keyboard_push('A');
 
+    /**
+     * Testing the process arguments, inject the argumets
+     */
+    struct command_argument argument;
+    strcpy(argument.argument, "Testing!");
+    argument.next = 0x00; 
+    process_inject_arguments(process, &argument);   
+
+    /**
+     * Loading again, create a second process
+     */
+    res = process_load_switch("0:/blank.elf", &process);
+    if (res != MULTITASK_OS_KERNELSHELL_ALL_OK)
+    {
+        panic("Failed to load blank.elf\n");
+    }
+
+    /**
+     * after create second process, inject the ABC into that
+     */
+    strcpy(argument.argument, "Abc!");
+    argument.next = 0x00; 
+    process_inject_arguments(process, &argument);
+
+    /**
+     * Task run after inject arguments
+     */
     task_run_first_ever_task(); // Run the first task, which is the process we just loaded
 
 

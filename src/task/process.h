@@ -11,9 +11,27 @@
 
 typedef unsigned char PROCESS_FILETYPE;
 
+struct process_allocation
+{
+    void* ptr;
+    size_t size;// the size of any allocation.
+};
+
+struct command_argument
+{
+    char argument[512];
+    struct command_argument* next;
+};
+
+struct process_arguments
+{
+    int argc;
+    char** argv;
+};
+
 /**
  * open a notepad in windows, is the process,next is defining how kernel see the process,
- * the next process can be expended if we need to
+ * the next process can be expended if we need to.
  */
 struct process
 {
@@ -26,7 +44,7 @@ struct process
     struct task* task;
 
     // The memory (malloc) allocations of the process, free memory by tracking memory have been allocated
-    void* allocations[MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS];
+    struct process_allocation allocations[MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS];
 
     PROCESS_FILETYPE filetype;
     union
@@ -49,6 +67,8 @@ struct process
         int head;
     } keyboard;
 
+    struct process_arguments arguments;// The argument of the process.
+
 };
 
 int process_switch(struct process* process);
@@ -61,5 +81,9 @@ struct process* process_get(int process_id);
 
 void* process_malloc(struct process* process, size_t size);
 void process_free(struct process* process, void* ptr);
+
+void process_get_arguments(struct process* process, int* argc, char*** argv);
+int process_inject_arguments(struct process* process, struct command_argument* root_argument);
+int process_terminate(struct process* process);
 
 #endif

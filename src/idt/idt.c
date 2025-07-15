@@ -5,6 +5,7 @@
 #include "io/io.h"
 #include "task/task.h"
 #include "status.h"
+#include "task/process.h"
 
 struct idt_desc idt_descriptors[MULTITASK_OS_KERNELSHELL_TOTAL_INTERRUPTS];
 struct idtr_desc idtr_descriptor;
@@ -66,6 +67,21 @@ void idt_set(int interrupt_no, void* address)
     desc->offset_2 = (uint32_t) address >> 16; // upper 16 bits of offset
 
 }
+
+void idt_handle_exception()
+{
+    process_terminate(task_current()->process);// terminate current process that is running
+    task_next();// grab the next task, and execute it in linked list
+}
+
+void idt_clock()
+{
+    outb(0x20, 0x20);
+    
+    // Switch to the next task
+    task_next();
+}
+
 void idt_init()
 {
     memset(idt_descriptors, 0, sizeof(idt_descriptors));
@@ -80,6 +96,13 @@ void idt_init()
     idt_set(0, idt_zero); // Example: Set interrupt 0 to a dummy address
     //idt_set(0x21, int21h); // Set interrupt 21h to the keyboard handler
     idt_set(0x80, isr80h_wapper);
+
+    for (int i = 0; i < 0x20; i++)
+    {
+        idt_register_interrupt_callback(i, idt_handle_exception);
+    }
+
+    idt_register_interrupt_callback(0x20, idt_clock);
 
     // load the interrupt descriptor table
     idt_load(&idtr_descriptor);// passing the address of the IDTR

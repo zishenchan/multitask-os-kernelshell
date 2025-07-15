@@ -14,7 +14,9 @@ int main(int argc, char** argv)
         /**
          * Test
          */
-        multitaskos_process_load_start(buf);
+        //multitaskos_process_load_start(buf);
+        //print("\n");
+        //multitaskos_system_run(buf);
         print("\n");
     }
     return 0;

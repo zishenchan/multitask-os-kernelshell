@@ -48,7 +48,7 @@ static int process_find_free_allocation_index(struct process* process)
     int res = -ENOMEM;
     for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS; i++)
     {
-        if (process->allocations[i] == 0)
+        if (process->allocations[i].ptr == 0)// change to "".ptr", it's array of allocation, not pointer.
         {
             res = i;
             break;
@@ -63,24 +63,43 @@ void* process_malloc(struct process* process, size_t size)
     void* ptr = kzalloc(size);
     if (!ptr)
     {
-        return 0;// fail to allocate memory
+        goto out_err;// fail to allocate memory
     }
 
     int index = process_find_free_allocation_index(process);
     if (index < 0)
     {
-        return 0;
+        goto out_err;
     }
 
-    process->allocations[index] = ptr;// there is error
+    /**
+     * Two ptr, map the memory from virtual address to physical address.
+     * Process only have one task
+     */
+    int res = paging_map_to(process->task->page_directory, ptr, ptr, paging_align_address(ptr+size), PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    if (res < 0)
+    {
+        goto out_err;
+    }
+
+    process->allocations[index].ptr = ptr;// there is error
+    process->allocations[index].size = size; // the size of the allocation
     return ptr;
+
+out_err: 
+    if(ptr)
+    {
+        kfree(ptr);
+    }
+    return 0;
 }
+
 
 static bool process_is_process_pointer(struct process* process, void* ptr)
 {
     for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS; i++)
     {
-        if (process->allocations[i] == ptr)
+        if (process->allocations[i].ptr == ptr)
             return true;
     }
 
@@ -91,11 +110,185 @@ static void process_allocation_unjoin(struct process* process, void* ptr)
 {
     for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS; i++)
     {
-        if (process->allocations[i] == ptr)
+        if (process->allocations[i].ptr == ptr)
         {
-            process->allocations[i] = 0x00;
+            process->allocations[i].ptr = 0x00;
+            process->allocations[i].size = 0;
         }
     }
+}
+
+static struct process_allocation* process_get_allocation_by_addr(struct process* process, void* addr)
+{
+    for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS; i++)
+    {
+        if (process->allocations[i].ptr == addr)// if the allocation equals to address
+            return &process->allocations[i];
+    }
+
+    return 0;
+}
+
+int process_terminate_allocations(struct process* process)
+{
+    for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROGRAM_ALLOCATIONS; i++)
+    {
+        process_free(process, process->allocations[i].ptr);
+    }
+
+    return 0;
+}
+
+int process_free_binary_data(struct process* process)
+{
+    kfree(process->ptr);
+    return 0;
+}
+
+int process_free_elf_data(struct process* process)
+{
+    elf_close(process->elf_file);
+    return 0;
+}
+int process_free_program_data(struct process* process)
+{
+    int res = 0;
+    switch(process->filetype)
+    {
+        case PROCESS_FILETYPE_BINARY:
+            res = process_free_binary_data(process);
+        break;
+
+        case PROCESS_FILETYPE_ELF:
+            res = process_free_elf_data(process);
+        break;
+
+        default:
+            res = -EINVARG;
+    }
+    return res;
+}
+
+void process_switch_to_any()
+{
+    for (int i = 0; i < MULTITASK_OS_KERNELSHELL_MAX_PROCESSES; i++)
+    {
+        if (processes[i])
+        {
+            process_switch(processes[i]);
+            return;
+        }
+    }
+
+    /**
+     * Can choose to process another process again, or another shell
+     */
+    panic("No processes to switch too\n");
+}
+
+static void process_unlink(struct process* process)
+{
+    processes[process->id] = 0x00;// remove the process from the array
+
+    if (current_process == process)
+    {
+        process_switch_to_any();
+    }
+}
+
+int process_terminate(struct process* process)
+{
+    int res = 0;
+
+    res = process_terminate_allocations(process);// kernel is responsible for cleaning up
+    if (res < 0)
+    {
+        goto out;
+    }
+
+    res = process_free_program_data(process);
+    if (res < 0)
+    {
+        goto out;
+    }
+
+    // Free the process stack memory.
+    kfree(process->stack);
+    // Free the task
+    task_free(process->task);
+    // Unlink the process from the process array.
+    process_unlink(process);
+
+    
+
+out:
+    return res;
+}
+
+void process_get_arguments(struct process* process, int* argc, char*** argv)
+{
+    *argc = process->arguments.argc;
+    *argv = process->arguments.argv;
+}
+
+int process_count_command_arguments(struct command_argument* root_argument)
+{
+    struct command_argument* current = root_argument;
+    int i = 0;
+    while(current)
+    {
+        i++;
+        current = current->next;
+    }
+
+    return i;
+}
+
+/**
+ * This function will take any command argument we pass, store in process arguments for us,
+ * readly for new command to use, to extract other process arguments. 
+ */
+int process_inject_arguments(struct process* process, struct command_argument* root_argument)
+{
+    int res = 0;
+    struct command_argument* current = root_argument;
+    int i = 0;
+    int argc = process_count_command_arguments(root_argument);
+    if (argc == 0)
+    {
+        res = -EIO;
+        goto out;
+    }
+
+    char **argv = process_malloc(process, sizeof(const char*) * argc);// genertee to access the memory
+    if (!argv)
+    {
+        res = -ENOMEM;// fail to declear the memory
+        goto out;
+    }
+
+
+    while(current)
+    {
+        char* argument_str = process_malloc(process, sizeof(current->argument));
+        if (!argument_str)
+        {
+            res = -ENOMEM;
+            goto out;
+        }
+        /**
+         * Possible store more memory than we expect 
+         */
+        strncpy(argument_str, current->argument, sizeof(current->argument));
+        argv[i] = argument_str;
+        current = current->next;
+        i++;
+    }
+
+    process->arguments.argc = argc;
+    process->arguments.argv = argv;
+out:
+    return res;
 }
 
 void process_free(struct process* process, void* ptr)
@@ -105,10 +298,27 @@ void process_free(struct process* process, void* ptr)
     {
         return;
     }
-
+    /**
+     * Unlinked the page from the process.
+     */
+    struct process_allocation* allocation = process_get_allocation_by_addr(process, ptr);
     // Unjoin the allocation
     process_allocation_unjoin(process, ptr);
+    if (!allocation)
+    {
+        // Oops its not our pointer.
+        return;
+    }
 
+    /**
+     * After allocation, upmap it.
+     * Set the flag to 0x00.
+     */
+    int res = paging_map_to(process->task->page_directory, allocation->ptr, allocation->ptr, paging_align_address(allocation->ptr+allocation->size), 0x00);
+    if (res < 0)
+    {
+        return;
+    }
     // We can now free the memory.
     kfree(ptr);
 }
